@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { SESSION_COOKIE, verifyPassword } from "@/lib/auth"
-import { createSession } from "@/lib/sessions"
+import { createSessionToken, SESSION_COOKIE } from "@/lib/auth"
+import { verifyPassword } from "@/lib/password"
 import { clientIp, logEvent } from "@/lib/log"
 
 export const runtime = "nodejs"
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   attempts.delete(ip)
   const response = NextResponse.json({ ok: true })
-  response.cookies.set(SESSION_COOKIE, await createSession(), {
+  response.cookies.set(SESSION_COOKIE, await createSessionToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

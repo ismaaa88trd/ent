@@ -1,33 +1,59 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "crypto"
 import { cookies } from "next/headers"
-import { verifySession } from "@/lib/sessions"
 
 export const SESSION_COOKIE = "ent_session"
+const SESSION_DAYS = 30
 
-/** scrypt-хеш пароля вида "соль:хеш" (hex). Создаётся скриптом scripts/set-password.mjs. */
-export function verifyPassword(password: string, stored: string | undefined) {
-  if (!stored) return false
-  const [saltHex, hashHex] = stored.split(":")
-  if (!saltHex || !hashHex) return false
-  const salt = Buffer.from(saltHex, "hex")
-  const expected = Buffer.from(hashHex, "hex")
-  const actual = scryptSync(password, salt, expected.length)
-  return actual.length === expected.length && timingSafeEqual(actual, expected)
+/**
+ * Проверка сессии работает в middleware на Edge-рантайме Vercel, где недоступна файловая
+ * система — поэтому сессия не хранится на диске, а представляет собой подписанный токен
+ * (время истечения + HMAC-подпись). Проверка — это только математика (crypto.subtle),
+ * без чтения файлов, поэтому не может зависнуть. Логаут не отзывает токен мгновенно на
+ * сервере (для этого нужна была бы база данных), но без пароля новый токен не получить,
+ * а старый действует максимум ещё SESSION_DAYS дней.
+ */
+function secret() {
+  const value = process.env.ENT_SESSION_SECRET
+  if (!value) throw new Error("ENT_SESSION_SECRET не задан — см. .env.example")
+  return value
 }
 
-export const verifySessionToken = verifySession
+function toHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+}
 
-export function randomStrongPassword(words = 5) {
-  // запасной вариант для scripts/set-password.mjs, если пользователь не передал свой пароль
-  const alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
-  return Array.from({ length: words }, () =>
-    Array.from(randomBytes(4))
-      .map((b) => alphabet[b % alphabet.length])
-      .join(""),
-  ).join("-")
+async function hmac(data: string) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret()), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data))
+  return toHex(signature)
+}
+
+export async function createSessionToken() {
+  const expires = Date.now() + SESSION_DAYS * 86_400_000
+  const payload = String(expires)
+  return `${payload}.${await hmac(payload)}`
+}
+
+// Edge-рантайм не даёт node:crypto, поэтому сравнение постоянного времени — на чистом JS:
+// проходим строку целиком независимо от результата, чтобы не выдавать раннее несовпадение.
+function timingSafeEqualHex(a: string, b: string) {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export async function verifySessionToken(token: string | undefined | null) {
+  if (!token) return false
+  const [payload, signature] = token.split(".")
+  if (!payload || !signature) return false
+  const expected = await hmac(payload)
+  if (!timingSafeEqualHex(signature, expected)) return false
+  return Number(payload) > Date.now()
 }
 
 export async function requireSession() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value
-  return verifySession(token)
+  return verifySessionToken(token)
 }

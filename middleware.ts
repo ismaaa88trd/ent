@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
 
-export const runtime = "nodejs"
+// Намеренно без export const runtime = "nodejs": проверка сессии — это только
+// crypto.subtle (HMAC) без обращения к файловой системе, поэтому middleware безопасно
+// работает на Edge-рантайме Vercel (быстро, без риска зависнуть на fs-операциях).
 
 const PUBLIC_PATHS = ["/login", "/api/login"]
 

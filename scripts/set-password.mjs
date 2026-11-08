@@ -13,9 +13,11 @@ function randomStrongPassword(words = 5) {
 const password = process.argv[2] || randomStrongPassword()
 const salt = randomBytes(16)
 const hash = scryptSync(password, salt, 64)
+const sessionSecret = randomBytes(32).toString("hex")
 
-console.log("Скопируй это в .env.local (локально) и в Environment Variables на Vercel:\n")
+console.log("Скопируй оба значения в .env.local (локально) и в Environment Variables на Vercel:\n")
 console.log(`ENT_PASSWORD_HASH=${salt.toString("hex")}:${hash.toString("hex")}`)
+console.log(`ENT_SESSION_SECRET=${sessionSecret}`)
 if (!process.argv[2]) {
   console.log(`\nТвой пароль для входа (запиши его — он нигде не хранится в открытом виде):\n${password}`)
 } else {
